@@ -1,3 +1,4 @@
+// NoFap-Bot Handler
 package main
 
 import (
@@ -18,9 +19,41 @@ type Update struct {
 
 // Message is a telegram object that can be found in an update.
 type Message struct {
-	Text string `json:"text"`
-	Chat Chat   `json:"chat"`
-	User User   `json:"from"`
+	Text     string           `json:"text"`
+	Chat     Chat             `json:"chat"`
+	User     User             `json:"from"`
+	Entities *[]MessageEntity `json:"entities"`
+}
+
+// IsCommand checks if a message is a command
+func (m *Message) IsCommand() bool {
+	if m.Entities == nil || len(*m.Entities) == 0 {
+		return false
+	}
+
+	entity := (*m.Entities)[0]
+	return entity.Offset == 0 && entity.IsCommand()
+}
+
+// Command reads the command sent by the user
+func (m *Message) Command() string {
+	if !m.IsCommand() {
+		return ""
+	}
+
+	entity := (*m.Entities)[0]
+	return m.Text[1:entity.Length]
+
+}
+
+type MessageEntity struct {
+	Type   string `json:"type"`
+	Offset int    `json:"offset"`
+	Length int    `json:"length"`
+}
+
+func (e MessageEntity) IsCommand() bool {
+	return e.Type == "bot_command"
 }
 
 // User is a telegram object that represents a user
@@ -44,20 +77,15 @@ func main() {
 
 }
 
-func parseTelegramRequest(r *http.Request) (*Update, error) {
-	var update Update
-	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
-		log.Printf("could not decode incoming update %s", err.Error())
-		return nil, err
-	}
-
-	return &update, nil
-}
-
 func handleTelegramWebhook(w http.ResponseWriter, r *http.Request) {
 	var update, err = parseTelegramRequest(r)
 	if err != nil {
 		log.Printf("error parsing update %s", err.Error())
+		return
+	}
+
+	if update.Message.Text == "" {
+		log.Print("No message")
 		return
 	}
 
@@ -66,14 +94,34 @@ func handleTelegramWebhook(w http.ResponseWriter, r *http.Request) {
 		log.Printf("error printing user object")
 	}
 
-	log.Printf("user obj: %s", transformed)
-	var telegramResponseBody, errTelegram = sendTextToTelegramChat(update.Message.Chat.Id, "hello belle")
-	if errTelegram != nil {
-		log.Printf("got error %s from telegram, reponse body is %s", errTelegram.Error(), telegramResponseBody)
-	} else {
-		log.Printf("punchline %s successfuly distributed to chat id %d", "hello", update.Message.Chat.Id)
+	log.Printf("[user obj]: %s", transformed)
+	if update.Message.IsCommand() {
+		var text string = ""
+		switch update.Message.Command() {
+		case "tite":
+			{
+				text = "maliit tite mo whahaha"
+			}
+		}
+		var telegramResponseBody, errTelegram = sendTextToTelegramChat(update.Message.Chat.Id, text)
+
+		if errTelegram != nil {
+			log.Printf("got error %s from telegram, reponse body is %s", errTelegram.Error(), telegramResponseBody)
+		} else {
+			log.Printf("Success with sending %s to %d", text, update.Message.Chat.Id)
+		}
 	}
 
+}
+
+func parseTelegramRequest(r *http.Request) (*Update, error) {
+	var update Update
+	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+		log.Printf("could not decode incoming update %s", err.Error())
+		return nil, err
+	}
+
+	return &update, nil
 }
 
 func sendTextToTelegramChat(chatId int, text string) (string, error) {

@@ -113,7 +113,7 @@ func main() {
 	// if err != nil {
 	// 	log.Fatal("Error loading .env.local file")
 	// }
-
+	port := os.Getenv("PORT")
 	dbUser := os.Getenv("DB_USER")
 	dbPassword := os.Getenv("DB_PASS")
 	dbName := os.Getenv("DB_NAME")
@@ -139,7 +139,7 @@ func main() {
 	}
 
 	log.Printf("Listening on PORT 8000")
-	http.ListenAndServe(":8000", mux)
+	http.ListenAndServe(":"+port, mux)
 
 }
 

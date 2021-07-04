@@ -110,5 +110,6 @@ $RECYCLE.BIN/
 *.lnk
 
 .env.local
+*.db
 
 # End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,go,windows,macos,linux

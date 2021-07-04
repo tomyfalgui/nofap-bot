@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -110,10 +109,10 @@ type Streak struct {
 func main() {
 
 	// load env file
-	err := godotenv.Load(".env.local")
-	if err != nil {
-		log.Fatal("Error loading .env.local file")
-	}
+	// err := godotenv.Load(".env.local")
+	// if err != nil {
+	// 	log.Fatal("Error loading .env.local file")
+	// }
 
 	dbUser := os.Getenv("DB_USER")
 	dbPassword := os.Getenv("DB_PASS")

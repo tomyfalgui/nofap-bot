@@ -2,11 +2,12 @@
 package main
 
 import (
-	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,7 +15,9 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/joho/godotenv"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 // Update is a Telegram object that the handler receives every time a user interacts with our bot
@@ -97,27 +100,40 @@ type Chat struct {
 	Id int `json:"id"`
 }
 
-var DB *sql.DB
+var DB *gorm.DB
+
+type Streak struct {
+	Id          uint `gorm:"primaryKey"`
+	StreakStart string
+}
 
 func main() {
+
+	// load env file
+	err := godotenv.Load(".env.local")
+	if err != nil {
+		log.Fatal("Error loading .env.local file")
+	}
+
+	dbUser := os.Getenv("DB_USER")
+	dbPassword := os.Getenv("DB_PASS")
+	dbName := os.Getenv("DB_NAME")
+	dbHost := os.Getenv("DB_HOST")
+	dbPort := os.Getenv("DB_PORT")
+
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s", dbHost, dbUser, dbPassword, dbName, dbPort)
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+
+	if err != nil {
+		log.Fatal("Error connecting to database")
+	}
+
+	DB = db
+	DB.AutoMigrate(&Streak{})
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/bot-handler", handleTelegramWebhook)
 
-	db, err := sql.Open("sqlite3", "./tae.db")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer db.Close()
-	DB = db
-
-	result, err := DB.Exec(`
-		CREATE TABLE IF NOT EXISTS streaks (
-			id integer not null primary key,
-			streak integer,
-			streak_start text
-		);
-	 	`)
-	_ = result
 	if err != nil {
 		log.Printf("error creating table %q", err)
 		return
@@ -132,68 +148,41 @@ func getPictures() []string {
 	return []string{"AgACAgUAAxkBAAP_YOFLIVgSfI-IbSImZE1PiSAZTacAAp2sMRt_eAlXutnBAAGWoxhtAQADAgADcwADIAQ", "AgACAgUAAxkBAAIBAAFg4Us0ZZ5J3ixGenh39pNpUZlwZAACoKwxG394CVdAqmmcK6AvoQEAAwIAA3MAAyAE", "AgACAgUAAxkBAAIBAWDhS0evf1N9p0QdCvbv7R1Q6lj4AAKhrDEbf3gJVxljkJHrntoMAQADAgADcwADIAQ"}
 }
 
-func getUser(update *Update) (int, int, string) {
-	stmt, err := DB.Prepare("select id, streak, streak_start from streaks where id = ?")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer stmt.Close()
-	var id int
-	var streak int
-	var streakStart string
-	err = stmt.QueryRow(strconv.Itoa(update.Message.User.Id)).Scan(&id, &streak, &streakStart)
-	if err != nil {
-		log.Printf("%q", err)
-		return 0, 0, ""
-	}
-	return id, streak, streakStart
+func getHornyStatements() []string {
+	return []string{"Stop. Don't do it.", "God is watching you.", "Go get a cold shower.", "Work out Work Out. Move your butt!", "Think about your granny."}
 }
 
-func setStreak(update *Update, newStreak int) {
-	id, streak, streakStart := getUser(update)
-	if id == 0 {
-		tx, err := DB.Begin()
-		if err != nil {
-			log.Fatal(err)
-		}
-		stmt, err := tx.Prepare("insert into streaks(id, streak, streak_start) values(?, ?, ?)")
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer stmt.Close()
-		t := time.Now()
-		// subtract startStreak
-		after := t.AddDate(0, 0, -newStreak)
-		s := after.Format("2006-01-02")
-		result, err := stmt.Exec(update.Message.User.Id, newStreak, s)
-		if err != nil {
-			log.Fatal(err)
-		}
-		_ = result
-		tx.Commit()
-	} else {
-		tx, err := DB.Begin()
-		if err != nil {
-			log.Fatal(err)
-		}
-		stmt, err := tx.Prepare("UPDATE streaks SET streak=?, streak_start=? WHERE id=?")
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer stmt.Close()
-		t := time.Now()
-		// subtract startStreak
-		after := t.AddDate(0, 0, -newStreak)
-		s := after.Format("2006-01-02")
-		result, err := stmt.Exec(newStreak, s, update.Message.User.Id)
-		if err != nil {
-			log.Fatal(err)
-		}
-		_ = result
-		tx.Commit()
+func getUser(update *Update) (uint, uint, string) {
+	var streak Streak
+	err := DB.First(&streak, update.Message.User.Id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, 0, ""
 	}
-	_ = streak
-	_ = streakStart
+
+	timeFormat := "2006-01-02"
+
+	t, _ := time.Parse(timeFormat, streak.StreakStart)
+	duration := time.Since(t)
+	fmt.Println(duration.Hours())
+	hours := duration.Hours() / 24
+
+	return streak.Id, uint(hours), streak.StreakStart
+}
+
+func setStreak(update *Update, newStreak string) {
+	id, _, _ := getUser(update)
+	if id == 0 {
+		newStreak := Streak{Id: uint(update.Message.User.Id), StreakStart: newStreak}
+		result := DB.Create(&newStreak)
+		if result.Error != nil {
+			log.Fatal(result.Error)
+		}
+	} else {
+		var streak Streak
+		DB.First(&streak, update.Message.User.Id)
+		streak.StreakStart = newStreak
+		DB.Save(&streak)
+	}
 }
 
 func handleTelegramWebhook(w http.ResponseWriter, r *http.Request) {
@@ -207,121 +196,98 @@ func handleTelegramWebhook(w http.ResponseWriter, r *http.Request) {
 		log.Print("No message")
 		return
 	}
-	transformed, err := json.MarshalIndent(update.Message, "", "    ")
-	if err != nil {
-		log.Printf("error printing user object")
-	}
-	log.Printf("[user obj]: %s", transformed)
+
 	if update.Message.IsCommand() {
 		var text string = ""
 		switch update.Message.Command() {
 		case "start":
 			{
-				id, streak, streak_start := getUser(update)
+				id, streak, _ := getUser(update)
 
 				if id == 0 {
-					tx, err := DB.Begin()
-					if err != nil {
-						log.Fatal(err)
-					}
-					stmt, err := tx.Prepare("insert into streaks(id, streak, streak_start) values(?, ?, ?)")
-					if err != nil {
-						log.Fatal(err)
-					}
-					defer stmt.Close()
 					t := time.Now()
 					s := t.Format("2006-01-02")
-					result, err := stmt.Exec(update.Message.User.Id, 0, s)
-					if err != nil {
-						log.Fatal(err)
+
+					newStreak := Streak{Id: uint(update.Message.User.Id), StreakStart: s}
+					result := DB.Create(&newStreak)
+					if result.Error != nil {
+						log.Fatal(result.Error)
 					}
-					_ = result
-					tx.Commit()
-					text = "Created babyyy"
+					text = fmt.Sprintf("Your streak is this loooong: %d", streak)
 				} else {
 
 					text = fmt.Sprintf("Your streak is this loooong: %d", streak)
 				}
-				_ = streak_start
 			}
 		case "streak":
 			{
 
 				id, streak, streak_start := getUser(update)
 				if id == 0 {
-					tx, err := DB.Begin()
-					if err != nil {
-						log.Fatal(err)
-					}
-					stmt, err := tx.Prepare("insert into streaks(id, streak, streak_start) values(?, ?, ?)")
-					if err != nil {
-						log.Fatal(err)
-					}
-					defer stmt.Close()
-					t := time.Now().Local()
+					t := time.Now()
 					s := t.Format("2006-01-02")
-					result, err := stmt.Exec(update.Message.User.Id, 0, s)
-					if err != nil {
-						log.Fatal(err)
+
+					newStreak := Streak{Id: uint(update.Message.User.Id), StreakStart: s}
+					result := DB.Create(&newStreak)
+					if result.Error != nil {
+						log.Fatal(result.Error)
 					}
-					_ = result
-					tx.Commit()
 					text = fmt.Sprintf("Your streak is this loooong: %d", 0)
 				} else {
-					text = fmt.Sprintf("Your streak is this loooong: %d. Fap free since %s 🔥🔥🔥🔥🔥🔥🔥", streak, streak_start)
+					text = fmt.Sprintf("%d day streak \n\nFap free since %s 🔥🔥🔥🔥🔥🔥🔥", streak, streak_start)
 				}
 			}
 
 		case "horny":
 			{
-				// pictures := getPictures()
-				// var telegramResponseBody, errTelegram = sendPhotoToTelegramChat(update.Message.Chat.Id, pictures[rand.Intn(len(pictures))])
-
-				// if errTelegram != nil {
-				// 	log.Printf("got error %s from telegram, reponse body is %s", errTelegram.Error(), telegramResponseBody)
-				// } else {
-				// 	log.Printf("Success with sending image to %d", update.Message.Chat.Id)
-				// }
-				// return
-				text = "Stop. Dont do it."
+				statements := getHornyStatements()
+				text = statements[rand.Intn(len(statements))]
 			}
 		case "setstreak":
 			{
 				processedArgCommand := update.Message.CommandArguments()
 				processedArgCommand = strings.Trim(processedArgCommand, " ")
 				if argLength := len(processedArgCommand); argLength == 0 {
-					text = "Please provide an argument"
+					text = "Please provide a date. Try /setstreak YYYY-MM-DD"
 				} else {
-					converted, err := strconv.Atoi(processedArgCommand)
+					layout := "2006-01-02"
+					t, err := time.Parse(layout, processedArgCommand)
 					if err != nil {
-						text = "Please provide a number"
-					}
-					if converted <= 0 {
-
-						text = "Please provide a positive number"
+						var sb strings.Builder
+						sb.WriteString("Please provide a date in the proper format.\n\n")
+						sb.WriteString("Try /setstreak YYYY-MM-DD")
+						text = sb.String()
 					} else {
+						t2, _ := time.Parse("2006-01-02", t.Format("2006-01-02"))
+						duration := time.Since(t2)
+						if duration.Hours() < 0 {
+							text = "That date is in the future. Don't fool yourself."
+						} else {
 
-						text = "Alls well"
-						setStreak(update, converted)
+							text = "Streak updated!!!"
+							setStreak(update, t.Format("2006-01-02"))
+						}
+
 					}
 				}
-				log.Printf("%s", update.Message.CommandArguments())
 			}
 		case "help":
 			{
-				text = `
-			These are my commands.
-			
-			/help - Get help
-			/streak - Get your current streak
-			/setstreak - Set streak
-			/horny - Get horny pic
-			/restart - Break streak :((((
-			`
+				var sb strings.Builder
+
+				sb.WriteString("These are my commands.\n")
+				sb.WriteString("\n")
+				sb.WriteString("/help - List commands\n")
+				sb.WriteString("/streak - Get your current streak\n")
+				sb.WriteString("/setstreak - Set streak YYYY-MM-DD\n")
+				sb.WriteString("/horny - Get horny pic\n")
+				sb.WriteString("/restart - Break streak :((((\n")
+
+				text = sb.String()
 			}
 		case "restart":
 			{
-				setStreak(update, 0)
+				setStreak(update, time.Now().Format("2006-01-02"))
 				text = "It's okay bro. We got this"
 			}
 		default:
@@ -336,6 +302,14 @@ func handleTelegramWebhook(w http.ResponseWriter, r *http.Request) {
 			log.Printf("got error %s from telegram, reponse body is %s", errTelegram.Error(), telegramResponseBody)
 		} else {
 			log.Printf("Success with sending %s to %d", text, update.Message.Chat.Id)
+		}
+	} else {
+		var telegramResponseBody, errTelegram = sendTextToTelegramChat(update.Message.Chat.Id, "Check out our commands by typing /help")
+
+		if errTelegram != nil {
+			log.Printf("got error %s from telegram, reponse body is %s", errTelegram.Error(), telegramResponseBody)
+		} else {
+			log.Printf("Success with sending %s to %d", "Check out our commands by typing /help", update.Message.Chat.Id)
 		}
 	}
 

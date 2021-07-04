@@ -132,25 +132,69 @@ func getPictures() []string {
 	return []string{"AgACAgUAAxkBAAP_YOFLIVgSfI-IbSImZE1PiSAZTacAAp2sMRt_eAlXutnBAAGWoxhtAQADAgADcwADIAQ", "AgACAgUAAxkBAAIBAAFg4Us0ZZ5J3ixGenh39pNpUZlwZAACoKwxG394CVdAqmmcK6AvoQEAAwIAA3MAAyAE", "AgACAgUAAxkBAAIBAWDhS0evf1N9p0QdCvbv7R1Q6lj4AAKhrDEbf3gJVxljkJHrntoMAQADAgADcwADIAQ"}
 }
 
-func getUser(update *Update) (int, int) {
-	stmt, err := DB.Prepare("select id, streak from streaks where id = ?")
+func getUser(update *Update) (int, int, string) {
+	stmt, err := DB.Prepare("select id, streak, streak_start from streaks where id = ?")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer stmt.Close()
 	var id int
 	var streak int
-	err = stmt.QueryRow(strconv.Itoa(update.Message.User.Id)).Scan(&id, &streak)
+	var streakStart string
+	err = stmt.QueryRow(strconv.Itoa(update.Message.User.Id)).Scan(&id, &streak, &streakStart)
 	if err != nil {
 		log.Printf("%q", err)
-		return 0, 0
+		return 0, 0, ""
 	}
-	return id, streak
+	return id, streak, streakStart
 }
 
-// func setStreak(update *Update) {
-// 	id, streak :=
-// }
+func setStreak(update *Update, newStreak int) {
+	id, streak, streakStart := getUser(update)
+	if id == 0 {
+		tx, err := DB.Begin()
+		if err != nil {
+			log.Fatal(err)
+		}
+		stmt, err := tx.Prepare("insert into streaks(id, streak, streak_start) values(?, ?, ?)")
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer stmt.Close()
+		t := time.Now()
+		// subtract startStreak
+		after := t.AddDate(0, 0, -newStreak)
+		s := after.Format("2006-01-02")
+		result, err := stmt.Exec(update.Message.User.Id, newStreak, s)
+		if err != nil {
+			log.Fatal(err)
+		}
+		_ = result
+		tx.Commit()
+	} else {
+		tx, err := DB.Begin()
+		if err != nil {
+			log.Fatal(err)
+		}
+		stmt, err := tx.Prepare("UPDATE streaks SET streak=?, streak_start=? WHERE id=?")
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer stmt.Close()
+		t := time.Now()
+		// subtract startStreak
+		after := t.AddDate(0, 0, -newStreak)
+		s := after.Format("2006-01-02")
+		result, err := stmt.Exec(newStreak, s, update.Message.User.Id)
+		if err != nil {
+			log.Fatal(err)
+		}
+		_ = result
+		tx.Commit()
+	}
+	_ = streak
+	_ = streakStart
+}
 
 func handleTelegramWebhook(w http.ResponseWriter, r *http.Request) {
 	var update, err = parseTelegramRequest(r)
@@ -173,7 +217,7 @@ func handleTelegramWebhook(w http.ResponseWriter, r *http.Request) {
 		switch update.Message.Command() {
 		case "start":
 			{
-				id, streak := getUser(update)
+				id, streak, streak_start := getUser(update)
 
 				if id == 0 {
 					tx, err := DB.Begin()
@@ -185,7 +229,7 @@ func handleTelegramWebhook(w http.ResponseWriter, r *http.Request) {
 						log.Fatal(err)
 					}
 					defer stmt.Close()
-					t := time.Now().Local()
+					t := time.Now()
 					s := t.Format("2006-01-02")
 					result, err := stmt.Exec(update.Message.User.Id, 0, s)
 					if err != nil {
@@ -198,11 +242,12 @@ func handleTelegramWebhook(w http.ResponseWriter, r *http.Request) {
 
 					text = fmt.Sprintf("Your streak is this loooong: %d", streak)
 				}
+				_ = streak_start
 			}
 		case "streak":
 			{
 
-				id, streak := getUser(update)
+				id, streak, streak_start := getUser(update)
 				if id == 0 {
 					tx, err := DB.Begin()
 					if err != nil {
@@ -223,7 +268,7 @@ func handleTelegramWebhook(w http.ResponseWriter, r *http.Request) {
 					tx.Commit()
 					text = fmt.Sprintf("Your streak is this loooong: %d", 0)
 				} else {
-					text = fmt.Sprintf("Your streak is this loooong: %d", streak)
+					text = fmt.Sprintf("Your streak is this loooong: %d. Fap free since %s 🔥🔥🔥🔥🔥🔥🔥", streak, streak_start)
 				}
 			}
 
@@ -257,6 +302,7 @@ func handleTelegramWebhook(w http.ResponseWriter, r *http.Request) {
 					} else {
 
 						text = "Alls well"
+						setStreak(update, converted)
 					}
 				}
 				log.Printf("%s", update.Message.CommandArguments())
@@ -270,7 +316,13 @@ func handleTelegramWebhook(w http.ResponseWriter, r *http.Request) {
 			/streak - Get your current streak
 			/setstreak - Set streak
 			/horny - Get horny pic
+			/restart - Break streak :((((
 			`
+			}
+		case "restart":
+			{
+				setStreak(update, 0)
+				text = "It's okay bro. We got this"
 			}
 		default:
 			{

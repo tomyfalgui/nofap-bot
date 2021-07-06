@@ -152,6 +152,21 @@ func getHornyStatements() []string {
 	return []string{"Stop. Don't do it.", "God is watching you.", "Go get a cold shower.", "Work out Work Out. Move your butt!", "Think about your granny."}
 }
 
+func getTips() []string {
+	var sb strings.Builder
+
+	sb.WriteString("1. Make a decision\n")
+	sb.WriteString("2. Understand Urges\n")
+	sb.WriteString("3. Change routine/habits\n")
+	sb.WriteString("4. Self improvement\n")
+	sb.WriteString("5. Dedication\n")
+	sb.WriteString("6. Re-direction\n")
+	sb.WriteString("7. Live\n\n")
+	sb.WriteString("-aanghel")
+
+	return []string{sb.String()}
+}
+
 func getUser(update *Update) (uint, uint, string) {
 	var streak Streak
 	err := DB.First(&streak, update.Message.User.Id).Error
@@ -280,6 +295,7 @@ func handleTelegramWebhook(w http.ResponseWriter, r *http.Request) {
 				sb.WriteString("/help - List commands\n")
 				sb.WriteString("/streak - Get your current streak\n")
 				sb.WriteString("/setstreak - Set streak YYYY-MM-DD\n")
+				sb.WriteString("/tip - Receive a random tip.\n")
 				sb.WriteString("/horny - Get horny pic\n")
 				sb.WriteString("/restart - Break streak :((((\n")
 
@@ -289,6 +305,11 @@ func handleTelegramWebhook(w http.ResponseWriter, r *http.Request) {
 			{
 				setStreak(update, time.Now().Format("2006-01-02"))
 				text = "It's okay bro. We got this"
+			}
+		case "tip":
+			{
+				statements := getTips()
+				text = statements[rand.Intn(len(statements))]
 			}
 		default:
 			{
